@@ -1,0 +1,63 @@
+from flask import Flask, render_template, request, send_file, after_this_request
+import yt_dlp
+import os
+import uuid
+
+app = Flask(__name__)
+
+DOWNLOAD_FOLDER = "downloads"
+if not os.path.exists(DOWNLOAD_FOLDER):
+    os.makedirs(DOWNLOAD_FOLDER)
+
+@app.route("/")
+def home():
+    return render_template("index.html")
+
+@app.route("/download", methods=["POST"])
+def download_video():
+    url = request.form.get("url")
+    quality = request.form.get("quality")
+
+    if not url:
+        return "No URL Provided", 400
+
+    filename = str(uuid.uuid4())
+    filepath = os.path.join(DOWNLOAD_FOLDER, filename + ".%(ext)s")
+
+    if quality == "audio":
+        ydl_opts = {
+            "format": "bestaudio/best",
+            "outtmpl": filepath,
+            "postprocessors": [{
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "192",
+            }],
+        }
+    else:
+        ydl_opts = {
+            "format": "best",
+            "outtmpl": filepath,
+        }
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        ydl.download([url])
+
+    for f in os.listdir(DOWNLOAD_FOLDER):
+        if f.startswith(filename):
+            file_path = os.path.join(DOWNLOAD_FOLDER, f)
+
+            @after_this_request
+            def cleanup(response):
+                try:
+                    os.remove(file_path)
+                except Exception as e:
+                    print(f"Error deleting file: {e}")
+                return response
+
+            return send_file(file_path, as_attachment=True, download_name=f)
+
+    return "Download failed", 500
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
